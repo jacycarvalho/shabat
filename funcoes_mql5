@@ -1,0 +1,365 @@
+NightScalper.mq5
+https://www.mql5.com/pt/code/16350
+
+//+------------------------------------------------------------------+
+//|    Close All Positions on Symbol                                 |
+//+------------------------------------------------------------------+
+void CloseAll(string Symb)
+  {
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      if(PositionGetSymbol(i)==Symb)
+        {
+         if(PositionGetInteger(POSITION_TYPE)<2) trade.PositionClose(Symb);
+        }
+     }
+  }
+//+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//|    Symbols Trade Function                                        |
+//+------------------------------------------------------------------+
+void SymbolTrade(string symb,int stop,int take,int per,double dev,double razmah,int start)
+  {
+   string s=(string)start+":00";
+   double Ask=SymbolInfoDouble(symb,SYMBOL_ASK);
+   double Bid=SymbolInfoDouble(symb,SYMBOL_BID);
+
+   BBHandle=iBands(symb,0,per,0,dev,0);
+   CopyBuffer(BBHandle,1,0,1,up);
+   CopyBuffer(BBHandle,2,0,1,dn);
+
+   double r=up[0]-dn[0];
+
+   if(CountTrades(symb)<1 && TimeCurrent()>StringToTime(s))
+     {
+      if(Ask<dn[0] && r<razmah*_Point) trade.PositionOpen(symb,0,Lot,Ask,Ask-stop*_Point,Ask+take*_Point);
+      if(Bid>up[0] && r<razmah*_Point) trade.PositionOpen(symb,1,Lot,Bid,Bid+stop*_Point,Bid-take*_Point);
+     }
+   else if(CountTrades(symb)>0 && TimeCurrent()<StringToTime(s)) CloseAll(symb);
+  }
+
+
+//+------------------------------------------------------------------+
+//| Count Trades on Symbol                                           |
+//+------------------------------------------------------------------+
+int CountTrades(string Symb)
+  {
+   int count=0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      if(PositionGetSymbol(i)==Symb)
+        {
+         if(PositionGetInteger(POSITION_TYPE)<2) count++;
+        }
+     }
+   return(count);
+  }
+
+
+https://www.mql5.com/pt/code/20881
+//+------------------------------------------------------------------+
+//| Refreshes the symbol quotes data                                 |
+//+------------------------------------------------------------------+
+bool RefreshRates(void)
+  {
+//--- refresh rates
+   if(!m_symbol.RefreshRates())
+     {
+      Print("RefreshRates error");
+      return(false);
+     }
+//--- protection against the return value of "zero"
+   if(m_symbol.Ask()==0 || m_symbol.Bid()==0)
+      return(false);
+//---
+   return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| checar posicao                              |
+//+------------------------------------------------------------------+
+void checkposition() 
+  { 
+//--- verificar se a posição está presente e exibir a hora de sua mudança 
+   if(PositionSelect(_Symbol)) 
+     {      
+//receber ID posição para trabalhos futuros 
+      ulong position_ID=PositionGetInteger(POSITION_IDENTIFIER); 
+      Print(_Symbol," posição #",position_ID); 
+//--- receber o tempo de posição formando em milissegundos desde 01.01.1970 
+      long create_time_msc=PositionGetInteger(POSITION_TIME_MSC); 
+      PrintFormat("Posição #%d  POSITION_TIME_MSC = %i64 milissegundos => %s",position_ID, 
+                  create_time_msc,TimeToString(create_time_msc/1000)); 
+//--- receber o tempo da última alteração da posição em segundos desde 01.01.1970 
+      long update_time_sec=PositionGetInteger(POSITION_TIME_UPDATE); 
+      PrintFormat("Posição #%d  POSITION_TIME_UPDATE = %i64 segundos => %s", 
+                  position_ID,update_time_sec,TimeToString(update_time_sec)); 
+//--- receber o tempo da última alteração da posição em milissegundos desde 01.01.1970 
+      long update_time_msc=PositionGetInteger(POSITION_TIME_UPDATE_MSC); 
+      PrintFormat("Posição #%d  POSITION_TIME_UPDATE_MSC = %i64 milissegundos => %s", 
+                  position_ID,update_time_msc,TimeToString(update_time_msc/1000)); 
+     } 
+//--- 
+  }
+
+
+//+------------------------------------------------------------------+
+//| Check the correctness of the position volume                     |
+//+------------------------------------------------------------------+
+bool CheckVolumeValue(double volume,string &error_description)
+  {
+//--- minimal allowed volume for trade operations
+   double min_volume=m_symbol.LotsMin();
+   if(volume<min_volume)
+     {
+      error_description=StringFormat("Volume is less than the minimal allowed SYMBOL_VOLUME_MIN=%.2f",min_volume);
+      return(false);
+     }
+//--- maximal allowed volume of trade operations
+   double max_volume=m_symbol.LotsMax();
+   if(volume>max_volume)
+     {
+      error_description=StringFormat("Volume is greater than the maximal allowed SYMBOL_VOLUME_MAX=%.2f",max_volume);
+      return(false);
+     }
+//--- get minimal step of volume changing
+   double volume_step=m_symbol.LotsStep();
+   int ratio=(int)MathRound(volume/volume_step);
+   if(MathAbs(ratio*volume_step-volume)>0.0000001)
+     {
+      error_description=StringFormat("Volume is not a multiple of the minimal step SYMBOL_VOLUME_STEP=%.2f, the closest correct volume is %.2f",
+                                     volume_step,ratio*volume_step);
+      return(false);
+     }
+   error_description="Correct volume value";
+   return(true);
+  }
+
+
+//+------------------------------------------------------------------+
+//| Is position exists                                               |
+//+------------------------------------------------------------------+
+bool IsPositionExists(void)
+  {
+   for(int i=PositionsTotal()-1;i>=0;i--)
+      if(m_position.SelectByIndex(i)) // selects the position by index for further access to its properties
+         if(m_position.Symbol()==m_symbol.Name() && m_position.Magic()==m_magic)
+            return(true);
+//---
+   return(false);
+  }
+
+
+//+------------------------------------------------------------------+
+//| Trailing                                                         |
+//+------------------------------------------------------------------+
+void Trailing()
+  {
+   if(InpTrailingStop==0)
+      return;
+   for(int i=PositionsTotal()-1;i>=0;i--) // returns the number of open positions
+      if(m_position.SelectByIndex(i))
+         if(m_position.Symbol()==m_symbol.Name() && m_position.Magic()==m_magic)
+           {
+            if(m_position.PositionType()==POSITION_TYPE_BUY)
+              {
+               if(m_position.PriceCurrent()-m_position.PriceOpen()>ExtTrailingStop+ExtTrailingStep)
+                  if(m_position.StopLoss()<m_position.PriceCurrent()-(ExtTrailingStop+ExtTrailingStep))
+                    {
+                     if(!m_trade.PositionModify(m_position.Ticket(),
+                        m_symbol.NormalizePrice(m_position.PriceCurrent()-ExtTrailingStop),
+                        m_position.TakeProfit()))
+                        Print("Modify BUY ",m_position.Ticket(),
+                              " Position -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                              ", description of result: ",m_trade.ResultRetcodeDescription());
+                    }
+              }
+            else
+              {
+               if(m_position.PriceOpen()-m_position.PriceCurrent()>ExtTrailingStop+ExtTrailingStep)
+                  if((m_position.StopLoss()>(m_position.PriceCurrent()+(ExtTrailingStop+ExtTrailingStep))) || 
+                     (m_position.StopLoss()==0))
+                    {
+                     if(!m_trade.PositionModify(m_position.Ticket(),
+                        m_symbol.NormalizePrice(m_position.PriceCurrent()+ExtTrailingStop),
+                        m_position.TakeProfit()))
+                        Print("Modify SELL ",m_position.Ticket(),
+                              " Position -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                              ", description of result: ",m_trade.ResultRetcodeDescription());
+                    }
+              }
+
+           }
+  }
+
+
+//+------------------------------------------------------------------+
+//| Open Buy position                                                |
+//+------------------------------------------------------------------+
+void OpenBuy(double sl,double tp)
+  {
+   sl=m_symbol.NormalizePrice(sl);
+   tp=m_symbol.NormalizePrice(tp);
+
+   double check_open_long_lot=0.0;
+   if(Risk>0.0)
+     {
+      check_open_long_lot=m_money.CheckOpenLong(m_symbol.Ask(),sl);
+      Print("sl=",DoubleToString(sl,m_symbol.Digits()),
+            ", CheckOpenLong: ",DoubleToString(check_open_long_lot,2),
+            ", Balance: ",    DoubleToString(m_account.Balance(),2),
+            ", Equity: ",     DoubleToString(m_account.Equity(),2),
+            ", FreeMargin: ", DoubleToString(m_account.FreeMargin(),2));
+      if(check_open_long_lot==0.0)
+        {
+         Print(__FUNCTION__,", ERROR: method CheckOpenLong returned the value of \"0.0\"");
+         return;
+        }
+     }
+   else
+      check_open_long_lot=InpLots;
+//--- check volume before OrderSend to avoid "not enough money" error (CTrade)
+   double check_volume_lot=m_trade.CheckVolume(m_symbol.Name(),check_open_long_lot,m_symbol.Ask(),ORDER_TYPE_BUY);
+
+   if(check_volume_lot!=0.0)
+     {
+      if(check_volume_lot>=check_open_long_lot)
+        {
+         if(m_trade.Buy(check_open_long_lot,NULL,m_symbol.Ask(),sl,tp))
+           {
+            if(m_trade.ResultDeal()==0)
+              {
+               Print("#1 Buy -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                     ", description of result: ",m_trade.ResultRetcodeDescription());
+               PrintResult(m_trade,m_symbol);
+              }
+            else
+              {
+               Print("#2 Buy -> true. Result Retcode: ",m_trade.ResultRetcode(),
+                     ", description of result: ",m_trade.ResultRetcodeDescription());
+               PrintResult(m_trade,m_symbol);
+              }
+           }
+         else
+           {
+            Print("#3 Buy -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                  ", description of result: ",m_trade.ResultRetcodeDescription());
+            PrintResult(m_trade,m_symbol);
+           }
+        }
+      else
+        {
+         string text="";
+         if(Risk>0.0)
+            text="< method CheckOpenLong ("+DoubleToString(check_open_long_lot,2)+")";
+         else
+            text="< Lots ("+DoubleToString(InpLots,2)+")";
+         Print(__FUNCTION__,", ERROR: method CheckVolume (",DoubleToString(check_volume_lot,2),") ",
+               text);
+         return;
+        }
+     }
+   else
+     {
+      Print(__FUNCTION__,", ERROR: method CheckVolume returned the value of \"0.0\"");
+      return;
+     }
+
+
+//+------------------------------------------------------------------+
+//| Open Sell position                                               |
+//+------------------------------------------------------------------+
+void OpenSell(double sl,double tp)
+  {
+   sl=m_symbol.NormalizePrice(sl);
+   tp=m_symbol.NormalizePrice(tp);
+
+   double check_open_short_lot=0.0;
+   if(Risk>0.0)
+     {
+      check_open_short_lot=m_money.CheckOpenShort(m_symbol.Bid(),sl);
+      Print("sl=",DoubleToString(sl,m_symbol.Digits()),
+            ", CheckOpenLong: ",DoubleToString(check_open_short_lot,2),
+            ", Balance: ",    DoubleToString(m_account.Balance(),2),
+            ", Equity: ",     DoubleToString(m_account.Equity(),2),
+            ", FreeMargin: ", DoubleToString(m_account.FreeMargin(),2));
+      if(check_open_short_lot==0.0)
+        {
+         Print(__FUNCTION__,", ERROR: method CheckOpenShort returned the value of \"0.0\"");
+         return;
+        }
+     }
+   else
+      check_open_short_lot=InpLots;
+//--- check volume before OrderSend to avoid "not enough money" error (CTrade)
+   double check_volume_lot=m_trade.CheckVolume(m_symbol.Name(),check_open_short_lot,m_symbol.Bid(),ORDER_TYPE_SELL);
+
+   if(check_volume_lot!=0.0)
+     {
+      if(check_volume_lot>=check_open_short_lot)
+        {
+         if(m_trade.Sell(check_open_short_lot,NULL,m_symbol.Bid(),sl,tp))
+           {
+            if(m_trade.ResultDeal()==0)
+              {
+               Print("#1 Sell -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                     ", description of result: ",m_trade.ResultRetcodeDescription());
+               PrintResult(m_trade,m_symbol);
+              }
+            else
+              {
+               Print("#2 Sell -> true. Result Retcode: ",m_trade.ResultRetcode(),
+                     ", description of result: ",m_trade.ResultRetcodeDescription());
+               PrintResult(m_trade,m_symbol);
+              }
+           }
+         else
+           {
+            Print("#3 Sell -> false. Result Retcode: ",m_trade.ResultRetcode(),
+                  ", description of result: ",m_trade.ResultRetcodeDescription());
+            PrintResult(m_trade,m_symbol);
+           }
+        }
+      else
+        {
+         string text="";
+         if(Risk>0.0)
+            text="< method CheckOpenShort ("+DoubleToString(check_open_short_lot,2)+")";
+         else
+            text="< Lots ("+DoubleToString(InpLots,2)+")";
+         Print(__FUNCTION__,", ERROR: method CheckVolume (",DoubleToString(InpLots,2),") ",
+               text);
+         return;
+        }
+     }
+   else
+     {
+      Print(__FUNCTION__,", ERROR: method CheckVolume returned the value of \"0.0\"");
+      return;
+     }
+
+
+//+------------------------------------------------------------------+
+//| Print CTrade result                                              |
+//+------------------------------------------------------------------+
+void PrintResult(CTrade &trade,CSymbolInfo &symbol)
+  {
+   Print("Code of request result: "+IntegerToString(trade.ResultRetcode()));
+   Print("code of request result: "+trade.ResultRetcodeDescription());
+   Print("deal ticket: "+IntegerToString(trade.ResultDeal()));
+   Print("order ticket: "+IntegerToString(trade.ResultOrder()));
+   Print("volume of deal or order: "+DoubleToString(trade.ResultVolume(),2));
+   Print("price, confirmed by broker: "+DoubleToString(trade.ResultPrice(),symbol.Digits()));
+   Print("current bid price: "+DoubleToString(trade.ResultBid(),symbol.Digits()));
+   Print("current ask price: "+DoubleToString(trade.ResultAsk(),symbol.Digits()));
+   Print("broker comment: "+trade.ResultComment());
+//int d=0;
+  }
+//+------------------------------------------------------------------+
+
+
+
+
+
